@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
 
 #define TOKENS_QUANT 7 // Quantidades de tokens do .log
 #define MAX_SENSORES 100 // Quantidade máxima de sensores aceita
@@ -9,11 +10,47 @@ typedef struct {
     int count;
 
     long double soma_temperatura;
+    long double media_temperatura;
+    long double M2;
+
     long double soma_umidade;
     long double soma_energia;
     long double soma_corrente;
     long double soma_pressao;
 } SensorData;
+
+/**
+ * @brief Adiciona uma nova leitura de temperatura ao sensor e atualiza as estatísticas
+ * @details Atualiza o contador, a média e o acumulador M2 utilizando o algoritmo iterativo
+ *          para cálculo de desvio padrão (Welford). Também acumula a soma das temperaturas
+ * 
+ * @param sensor Ponteiro para a estrutura do sensor a ser atualizada
+ * @param valor Valor da temperatura a ser adicionada
+ */
+void add_temperatura(SensorData* sensor, double valor) {
+    sensor->count++;
+
+    long double delta = valor - sensor->media_temperatura;
+    sensor->media_temperatura += delta / sensor->count;
+
+    long double delta2 = valor - sensor->media_temperatura;
+    sensor->M2 += delta * delta2;
+
+    sensor->soma_temperatura += valor;
+}
+
+/**
+ * @brief Calcula o Desvio Padrão Populacional de um sensor de temperatura
+ * @details Usando o método de Welford, para economizar memória
+ * 
+ * @param sensor Ponteiro para a estrutura do sensor a ser atualizada
+ */
+long double calcular_DP_temperatura(SensorData* sensor) {
+    long double variancia = sensor->M2 / sensor->count;
+    double desvio = sqrtl(variancia);
+
+    return desvio;
+}
 
 /**
  * @brief Printa todos a Data de todos os sensores
@@ -23,31 +60,55 @@ typedef struct {
  */
 void print_sensores(SensorData* sensores) {
     for (int i = 0; i < MAX_SENSORES; i++) {
-        SensorData sensor = sensores[i];
+        SensorData* sensor = &sensores[i];
 
-        if (sensor.count == 0) continue;
+        if (sensor->count == 0) continue;
 
         printf("Sensor %d:\n", i+1);
-        printf("    count: %d\n", sensor.count);
-        if (sensor.soma_temperatura != 0) {
-            printf("    Soma temperatura:  %Lf\n", sensor.soma_temperatura);
-            printf("    Media temperatura: %Lf\n", sensor.soma_temperatura / sensor.count);
+        printf("    count: %d\n", sensor->count);
+        if (sensor->soma_temperatura != 0) {
+            printf("    Soma temperatura:  %Lf\n", sensor->soma_temperatura);
+            printf("    Media temperatura: %Lf\n", sensor->soma_temperatura / sensor->count);
+            printf("    Media temperatura: %Lf\n", sensor->media_temperatura);
+            printf("    DP da temperatura: %Lf\n", calcular_DP_temperatura(sensor));
         }
-        if (sensor.soma_umidade != 0)     {
-            printf("    Soma umidade:  %Lf\n", sensor.soma_umidade);
-            printf("    Media umidade: %Lf\n", sensor.soma_umidade / sensor.count);
+        // BUG:
+        // Deu resultado diferente de eu fazendo a média como:
+        //      sensor->soma_temperatura / sensor->count
+        // ao invés de
+        //      sensor->media_temp
+        // que provavelmente está mais correto que o anterior
+
+        /*
+            CONTINUE CONTINUE CONTINUE CONTINUE CONTINUE
+            CONTINUE CONTINUE CONTINUE CONTINUE CONTINUE
+            CONTINUE CONTINUE CONTINUE CONTINUE CONTINUE
+            CONTINUE CONTINUE CONTINUE CONTINUE CONTINUE
+            CONTINUE CONTINUE CONTINUE CONTINUE CONTINUE
+            CONTINUE CONTINUE CONTINUE CONTINUE CONTINUE
+            CONTINUE CONTINUE CONTINUE CONTINUE CONTINUE
+            CONTINUE CONTINUE CONTINUE CONTINUE CONTINUE
+            CONTINUE CONTINUE CONTINUE CONTINUE CONTINUE
+            CONTINUE CONTINUE CONTINUE CONTINUE CONTINUE
+
+            Acabei de terminar a implementação do calcular_DP_temperatura()
+            ACHO que é so printar os dados direito agora. Ênfase no ---> __**ACHO**__ <---
+        */
+        if (sensor->soma_umidade != 0)     {
+            printf("    Soma umidade:  %Lf\n", sensor->soma_umidade);
+            printf("    Media umidade: %Lf\n", sensor->soma_umidade / sensor->count);
         }
-        if (sensor.soma_energia != 0)     {
-            printf("    Soma energia:  %Lf\n", sensor.soma_energia);
-            printf("    Media energia: %Lf\n", sensor.soma_energia / sensor.count);
+        if (sensor->soma_energia != 0)     {
+            printf("    Soma energia:  %Lf\n", sensor->soma_energia);
+            printf("    Media energia: %Lf\n", sensor->soma_energia / sensor->count);
         }
-        if (sensor.soma_corrente != 0)    {
-            printf("    Soma corrente:  %Lf\n", sensor.soma_corrente);
-            printf("    Media corrente: %Lf\n", sensor.soma_corrente / sensor.count);
+        if (sensor->soma_corrente != 0)    {
+            printf("    Soma corrente:  %Lf\n", sensor->soma_corrente);
+            printf("    Media corrente: %Lf\n", sensor->soma_corrente / sensor->count);
         }
-        if (sensor.soma_pressao != 0)     {
-            printf("    Soma pressao:  %Lf\n", sensor.soma_pressao);
-            printf("    Media pressao: %Lf\n", sensor.soma_pressao / sensor.count);
+        if (sensor->soma_pressao != 0)     {
+            printf("    Soma pressao:  %Lf\n", sensor->soma_pressao);
+            printf("    Media pressao: %Lf\n", sensor->soma_pressao / sensor->count);
         }
         printf("\n");
     }
@@ -141,7 +202,8 @@ int main(int argc, char* argv[]) {
             sensores[sensorID].soma_energia += atof(token[4]);
             energiaTotal += atof(token[4]);
         }
-        else if (!strcmp(token[3], "temperatura")) sensores[sensorID].soma_temperatura += atof(token[4]);
+        // else if (!strcmp(token[3], "temperatura")) sensores[sensorID].soma_temperatura += atof(token[4]);
+        else if (!strcmp(token[3], "temperatura")) add_temperatura(&sensores[sensorID], atof(token[4]));
         else if (!strcmp(token[3], "umidade"))     sensores[sensorID].soma_umidade     += atof(token[4]);
         else if (!strcmp(token[3], "corrente"))    sensores[sensorID].soma_corrente    += atof(token[4]);
         else if (!strcmp(token[3], "pressao"))     sensores[sensorID].soma_pressao     += atof(token[4]);
