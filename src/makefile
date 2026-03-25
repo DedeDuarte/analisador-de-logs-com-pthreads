@@ -21,7 +21,7 @@ all:
 	@echo "    full  - Compila todas as versões"
 	@echo "    seq   - Compila versão sequencial"
 	@echo "    par   - Compila versão paralela"
-	@ecgo "    opt   - Compila versão otimizada"
+	@echo "    opt   - Compila versão otimizada"
 	@echo "    clean - Limpa arquivos"
 
 seq:
