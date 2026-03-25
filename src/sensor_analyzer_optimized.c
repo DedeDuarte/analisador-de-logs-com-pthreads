@@ -527,7 +527,7 @@ int main(int argc, char* argv[]) {
     sensor_analyzer_par(fileName, &data, sensores, quantThreads);
     timer_fim(&data);
 
-    print_data(&data, sensores);
+    // print_data(&data, sensores);
     print_final(&data, sensores);
 
     return 0;
