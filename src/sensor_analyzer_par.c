@@ -329,9 +329,11 @@ void print_final(DataGeral* data, SensorData* sensores) {
         "    Total:   %lld\n"
         "    OK:      %d\n"
         "    Alerta:  %d\n"
-        "    Critico: %d\n",
+        "    Critico: %d\n"
+        "\n"
+        "    Energia: %Lf\n",
         (long long) data->okTotais + (long long) data->alertasTotais + (long long) data->criticosTotais,
-        data->okTotais,  data->alertasTotais,  data->criticosTotais
+        data->okTotais,  data->alertasTotais,  data->criticosTotais, data->energiaTotal
     );
 
     // Tempo de execução
