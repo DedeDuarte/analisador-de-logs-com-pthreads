@@ -115,10 +115,13 @@ typedef struct {
  * @param sensor Ponteiro para a estrutura do sensor a ser atualizada
  * @param valor Valor da temperatura a ser adicionada
  */
-void add_sensor(SensorData* sensor, double valor, char* tipo, char* status, DataLocal* data, char* linha) {
+void add_sensor(SensorData* sensor, double valor, char* tipo, char* status, DataLocal* data_local, char* linha) {
+    // Trava o mutex
+    pthread_mutex_lock(&sensor->mutex);
+
     // Atribui qual o tipo do sensor
     if (sensor->count == 0) {
-        data->sensores++;
+        data_local->sensores++;
 
         if      (!strcmp(tipo, "energia"))     { sensor->sensor_energia     = 1; }
         else if (!strcmp(tipo, "temperatura")) { sensor->sensor_temperatura = 1; }
@@ -141,13 +144,16 @@ void add_sensor(SensorData* sensor, double valor, char* tipo, char* status, Data
     sensor->M2 += delta * delta2;
 
     sensor->soma += valor;
+
+    // Destrava o mutex
+    pthread_mutex_unlock(&sensor->mutex);
     
     // Soma o status
-    if (!strcmp(tipo, "energia")) { data->energiaTotal_local += valor; }
+    if (!strcmp(tipo, "energia")) { data_local->energiaTotal_local += valor; }
     
-    if      (!strcmp(status, "OK"))      { data->okTotais_local++; }
-    else if (!strcmp(status, "ALERTA"))  { data->alertasTotais_local++; }
-    else if (!strcmp(status, "CRITICO")) { data->criticosTotais_local++; }
+    if      (!strcmp(status, "OK"))      { data_local->okTotais_local++; }
+    else if (!strcmp(status, "ALERTA"))  { data_local->alertasTotais_local++; }
+    else if (!strcmp(status, "CRITICO")) { data_local->criticosTotais_local++; }
     else {
         printf("ERRO: Status de dado incorreto (%s):\n%s\n", status, linha);
         exit(5);
@@ -339,19 +345,19 @@ void print_final(DataGeral* data, SensorData* sensores) {
 void* func(void* args) {
     DataLocal data_local = {0};
     Thread* thread = (Thread*) args;
-    
+
     printf(
         "Thread %d: %11lld -> %11lld\n",
         thread->id, thread->inicio, thread-> fim
     );
-    
+
     // Abrir arquivo
     FILE* file = fopen(thread->fileName, "r");
     if (file == NULL) {
         perror("fopen");
         exit(2);
     }
-    
+
     fseek(file, thread->inicio, SEEK_SET);
     
     // Se não for a primeira thread, vai pra próxima linha
@@ -359,7 +365,7 @@ void* func(void* args) {
         int c;
         while ((c = fgetc(file)) != '\n' && c != EOF);
     }
-    
+
     // Lê o arquivo até o fim do bloco dessa thread
     char linha[256];
     while (ftell(file) < thread->fim && fgets(linha, sizeof(linha), file) != NULL) {
@@ -390,18 +396,16 @@ void* func(void* args) {
         }
         
         int sensorID = atoi(token[0] + 7)-1; // Formato: sensor_XXX -> sensor_ tem sete linhas,
-        // então (sensor_ + 7) = Parte numérica.
-        // -1 por ser index partindo de 0
-        
+                                             // então (sensor_ + 7) = Parte numérica.
+                                             // -1 por ser index partindo de 0
+
         if (sensorID >= MAX_SENSORES) {
             printf("ERRO: Quantidade de sensores maior do que o permitido! (Qauntidade máxima: %d)\n", MAX_SENSORES);
             exit(3);
         }
-        
+
         // Computando dados. O mutex atua dentro da função
-        pthread_mutex_lock(&thread->sensores[sensorID].mutex);
         add_sensor(&thread->sensores[sensorID], atof(token[4]), token[3], token[6], &data_local, linha_save);
-        pthread_mutex_unlock(&thread->sensores[sensorID].mutex);
     }
 
     fclose(file);
@@ -495,8 +499,3 @@ int main(int argc, char* argv[]) {
 
     return 0;
 }
-
-// CONTINUE
-// Descobrir por que n está somando os valores na DataGeral.
-// Até onde eu sei era para estar funcionando, mas claramente não está :)
-// Boa noite, são 1h da manhã, e eu tenho aula amanhã <3
