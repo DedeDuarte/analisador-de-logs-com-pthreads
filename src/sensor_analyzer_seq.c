@@ -1,4 +1,4 @@
-#define _POSIX_C_SOURCE 199309L // para CLOCK_MONOTONIC
+#define _POSIX_C_SOURCE 199309L // Nescessário para usar CLOCK_MONOTONIC
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -7,10 +7,23 @@
 #include <time.h>
 
 #define TOKENS_QUANT 7 // Quantidades de tokens do .log
-#define MAX_SENSORES 100 // Quantidade máxima de sensores aceita
+#define MAX_SENSORES 100 // Quantidade máxima de sensores aceita. Nescessário para alocar memória
 
+/**
+ * @brief Estrutura com informações gerais do arquivo lido
+ * 
+ * @param sensores Total de sensores lidos
+ * 
+ * @param okTotais Total de 'OK' lidos
+ * @param alertasTotais Total de 'ALERTA' lidos
+ * @param criticosTotais Total de 'CRITICO' lidos
+ * @param energiaTotal Total de energia utilizada
+ * 
+ * @param inicio struct de @c timespec . Início do processo de analize do arquivo
+ * @param fim struct de @c timespec . Fim do processo de analize do arquivo
+ */
 typedef struct {
-    int sensores;
+    long long sensores;
 
     int okTotais;
     int alertasTotais;
@@ -21,6 +34,22 @@ typedef struct {
     struct timespec fim;
 } DataGeral;
 
+/**
+ * @brief Estrutura de um único sensor
+ * @details @c sensor_... são variavis que indicam de qual tipo é aquele sensor
+ * 
+ * @param count Quantidade de vezes que aquele sensor foi lido
+ * 
+ * @param soma Soma total das leituras do sensor
+ * @param media Media total do sensor, atualizado a cada nova leitura do mesmo
+ * @param M2 Medida usada para calcular a DP do sensor no final.  Atualizado a cada nova leitura
+ * 
+ * @param sensor_temperatura Indica se o sensor é de temperatura
+ * @param sensor_umidade Indica se o sensor é de umidade
+ * @param sensor_energia Indica se o sensor é de energia
+ * @param sensor_corrente Indica se o sensor é de corrente
+ * @param sensor_pressao Indica se o sensor é de pressao
+ */
 typedef struct {
     int count;
 
@@ -155,19 +184,41 @@ void print_data(DataGeral* data, SensorData* sensores) {
     print_sensores(sensores);
 }
 
+/**
+ * @brief Inicio do cronômetro
+ * 
+ * @param data Estrutura onde estão as struct @c timespec de inicio e fim
+ */
 void timer_inicio(DataGeral* data) {
     clock_gettime(CLOCK_MONOTONIC, &data->inicio);
 }
 
+/**
+ * @brief Fim do cronômetro
+ * 
+ * @param data Estrutura onde estão as struct @c timespec de inicio e fim
+ */
 void timer_fim(DataGeral* data) {
     clock_gettime(CLOCK_MONOTONIC, &data->fim);
 }
 
+/**
+ * @brief Retorna o tempo decorrido entre o inicio e fim do cronômetro
+ * 
+ * @param data Estrutura onde estão as struct @c timespec de inicio e fim
+ */
 double timer_resultado(DataGeral* data) {
     return (data->fim.tv_sec - data->inicio.tv_sec) +
            (data->fim.tv_nsec - data->inicio.tv_nsec) / 1e9;
 }
 
+/**
+ * @brief Print final para o trabalho
+ * @details Chama as funções: @c calcular_DP() e @c timer_resultado()
+ * 
+ * @param data Estrutura de dados das informações gerais do arquivo
+ * @param sensores Lista de estruturas @c SensorData . Quantidade: @c MAX_SENSORES
+ */
 void print_final(DataGeral* data, SensorData* sensores) {
     printf(
         "Ps.:\n"
@@ -225,11 +276,11 @@ void print_final(DataGeral* data, SensorData* sensores) {
     // Total de alertas
     printf("\n"
         "Total de status:\n"
-        "    Total:   %d\n"
+        "    Total:   %lld\n"
         "    OK:      %d\n"
         "    Alerta:  %d\n"
         "    Critico: %d\n",
-        data->okTotais + data->alertasTotais + data->criticosTotais,
+        (long long) data->okTotais + (long long) data->alertasTotais + (long long) data->criticosTotais,
         data->okTotais,  data->alertasTotais,  data->criticosTotais
     );
 
@@ -241,6 +292,14 @@ void print_final(DataGeral* data, SensorData* sensores) {
     );
 }
 
+/**
+ * @brief Abrir e analizar arquivo solicitado, preenchendo estsrutauras com seus dados
+ * @details Chama a função @c add_sensor()
+ * 
+ * @param fileName Nome do arquivo desejado
+ * @param data Estrutura de dados das informações gerais do arquivo
+ * @param sensores Lista de estruturas @c SensorData . Quantidade: @c MAX_SENSORES
+ */
 void sensor_analyzer_seq(char* fileName, DataGeral* data, SensorData* sensores) {
     // Abrir arquivo
     FILE* file = fopen(fileName, "r");
@@ -285,6 +344,14 @@ void sensor_analyzer_seq(char* fileName, DataGeral* data, SensorData* sensores) 
     fclose(file);
 }
 
+
+/**
+ * @brief Função principal
+ * @details Chama as funções @c sensor_analyzer_seq() e @c time_...()
+ * 
+ * @param argc Quantidade de argumentos passados na execução
+ * @param argv Lista de strings dos argumentos passados
+ */
 int main(int argc, char* argv[]) {
     // Variaveis gerais
     DataGeral data = {0};
