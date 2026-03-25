@@ -65,8 +65,6 @@ typedef struct {
  * @param sensor_pressao Indica se o sensor é de pressao
  */
 typedef struct {
-    pthread_mutex_t mutex;
-
     int count;
 
     long double soma;
@@ -115,19 +113,16 @@ typedef struct {
  * @param sensor Ponteiro para a estrutura do sensor a ser atualizada
  * @param valor Valor da temperatura a ser adicionada
  */
-void add_sensor(SensorData* sensor, double valor, char* tipo, char* status, DataLocal* data_local, char* linha) {
-    // Trava o mutex
-    pthread_mutex_lock(&sensor->mutex);
-
+void add_sensor(SensorData* sensor_local, double valor, char* tipo, char* status, DataLocal* data_local, char* linha) {
     // Atribui qual o tipo do sensor
-    if (sensor->count == 0) {
+    if (sensor_local->count == 0) {
         data_local->sensores++;
 
-        if      (!strcmp(tipo, "energia"))     { sensor->sensor_energia     = 1; }
-        else if (!strcmp(tipo, "temperatura")) { sensor->sensor_temperatura = 1; }
-        else if (!strcmp(tipo, "umidade"))     { sensor->sensor_umidade     = 1; }
-        else if (!strcmp(tipo, "corrente"))    { sensor->sensor_corrente    = 1; }
-        else if (!strcmp(tipo, "pressao"))     { sensor->sensor_pressao     = 1; }
+        if      (!strcmp(tipo, "energia"))     { sensor_local->sensor_energia     = 1; }
+        else if (!strcmp(tipo, "temperatura")) { sensor_local->sensor_temperatura = 1; }
+        else if (!strcmp(tipo, "umidade"))     { sensor_local->sensor_umidade     = 1; }
+        else if (!strcmp(tipo, "corrente"))    { sensor_local->sensor_corrente    = 1; }
+        else if (!strcmp(tipo, "pressao"))     { sensor_local->sensor_pressao     = 1; }
         else {
             printf("ERRO: Tipo de dado incorreto (%s)\n", tipo);
             exit(4);
@@ -135,18 +130,15 @@ void add_sensor(SensorData* sensor, double valor, char* tipo, char* status, Data
     }
 
     // Atualizando soma, média e M2
-    sensor->count++;
+    sensor_local->count++;
 
-    long double delta = valor - sensor->media;
-    sensor->media += delta / sensor->count;
+    long double delta = valor - sensor_local->media;
+    sensor_local->media += delta / sensor_local->count;
 
-    long double delta2 = valor - sensor->media;
-    sensor->M2 += delta * delta2;
+    long double delta2 = valor - sensor_local->media;
+    sensor_local->M2 += delta * delta2;
 
-    sensor->soma += valor;
-
-    // Destrava o mutex
-    pthread_mutex_unlock(&sensor->mutex);
+    sensor_local->soma += valor;
     
     // Soma o status
     if (!strcmp(tipo, "energia")) { data_local->energiaTotal_local += valor; }
@@ -295,15 +287,22 @@ void print_final(DataGeral* data, SensorData* sensores) {
     }
 
     // Calculo e print do sensor mais instavel
-    int instavel_index = 0;
-    float DP = calcular_DP(&sensores[instavel_index]);
-    for (int i = 1; i < data->sensores; i++) {
-        float DP_i = calcular_DP(&sensores[i]);
+    int instavel_index = -1;
+    long double DP = 0.0L;
+    for (int i = 0; i < MAX_SENSORES; i++) {
+        if (sensores[i].count == 0) continue;
 
-        if (DP_i > DP) {
+        long double dp_i = calcular_DP(&sensores[i]);
+
+        if (instavel_index < 0 || dp_i > DP) {
             instavel_index = i;
-            DP = DP_i;
+            DP = dp_i;
         }
+    }
+
+    if (instavel_index < 0) {
+        printf("\nNenhum sensor para calcular instabilidade\n");
+        return;
     }
 
     SensorData* instavel = &sensores[instavel_index];
@@ -319,7 +318,7 @@ void print_final(DataGeral* data, SensorData* sensores) {
     printf("\n"
         "Sensor mais instavel:\n"
         "    Sensor %d (%s)\n"
-        "    DP: %f\n",
+        "    DP: %Lf\n",
         instavel_index+1, tipo, DP
     );
 
@@ -344,6 +343,8 @@ void print_final(DataGeral* data, SensorData* sensores) {
 
 void* func(void* args) {
     DataLocal data_local = {0};
+    SensorData sensores_local[MAX_SENSORES] = {0};
+
     Thread* thread = (Thread*) args;
 
     printf(
@@ -405,10 +406,12 @@ void* func(void* args) {
         }
 
         // Computando dados. O mutex atua dentro da função
-        add_sensor(&thread->sensores[sensorID], atof(token[4]), token[3], token[6], &data_local, linha_save);
+        add_sensor(&sensores_local[sensorID], atof(token[4]), token[3], token[6], &data_local, linha_save);
     }
 
     fclose(file);
+
+    // SensorData sensores_local[MAX_SENSORES] = {0};
 
     pthread_mutex_lock(&thread->data->mutex);
     thread->data->sensores       += data_local.sensores;
@@ -416,6 +419,38 @@ void* func(void* args) {
     thread->data->alertasTotais  += data_local.alertasTotais_local;
     thread->data->criticosTotais += data_local.criticosTotais_local;
     thread->data->energiaTotal   += data_local.energiaTotal_local;
+
+    for (int i = 0; i < MAX_SENSORES && i < data_local.sensores; i++) {
+        SensorData *s_global = &thread->sensores[i];
+        SensorData *s_local = &sensores_local[i];
+
+        if (s_local->count == 0) continue;
+
+        // copia direta se não havia dados globais ainda
+        if (s_global->count == 0) {
+            *s_global = *s_local;
+            continue;
+        }
+
+        long long n_a = s_global->count;
+        long long n_b = s_local->count;
+        long long n_ab = n_a + n_b;
+
+        long double delta = s_local->media - s_global->media;
+        long double media_ab = (n_a * s_global->media + n_b * s_local->media) / n_ab;
+        long double M2_ab = s_global->M2 + s_local->M2 + delta * delta * ((long double)n_a * n_b) / n_ab;
+
+        s_global->count = n_ab;
+        s_global->soma += s_local->soma;
+        s_global->media = media_ab;
+        s_global->M2 = M2_ab;
+
+        s_global->sensor_temperatura |= s_local->sensor_temperatura;
+        s_global->sensor_umidade     |= s_local->sensor_umidade;
+        s_global->sensor_energia     |= s_local->sensor_energia;
+        s_global->sensor_corrente    |= s_local->sensor_corrente;
+        s_global->sensor_pressao     |= s_local->sensor_pressao;
+    }
     pthread_mutex_unlock(&thread->data->mutex);
 
     printf(
@@ -460,7 +495,6 @@ void sensor_analyzer_par(char* fileName, DataGeral* data, SensorData* sensores, 
 
     for (int i = 0; i < quantThreads; i++) { pthread_join(threads[i].thread, NULL); }
     putchar('\n');
-    for (int i = 0; i < MAX_SENSORES; i++) { pthread_mutex_destroy(&sensores[i].mutex); }
 
     free(threads);
 }
@@ -487,14 +521,13 @@ int main(int argc, char* argv[]) {
     pthread_mutex_init(&data.mutex, NULL);
 
     SensorData sensores[MAX_SENSORES] = {0};
-    for (int i = 0; i < MAX_SENSORES; i++) { pthread_mutex_init(&sensores[i].mutex, NULL); }
 
     // Processo principal
     timer_inicio(&data);
     sensor_analyzer_par(fileName, &data, sensores, quantThreads);
     timer_fim(&data);
 
-    // print_data(&data, sensores);
+    print_data(&data, sensores);
     print_final(&data, sensores);
 
     return 0;
