@@ -115,10 +115,7 @@ typedef struct {
  * @param sensor Ponteiro para a estrutura do sensor a ser atualizada
  * @param valor Valor da temperatura a ser adicionada
  */
-void add_sensor(SensorData* sensor, double valor, char* tipo, char* status, DataLocal* data) {
-    // Trava Mutex
-    pthread_mutex_lock(&sensor->mutex);
-
+void add_sensor(SensorData* sensor, double valor, char* tipo, char* status, DataLocal* data, char* linha) {
     // Atribui qual o tipo do sensor
     if (sensor->count == 0) {
         data->sensores++;
@@ -144,18 +141,15 @@ void add_sensor(SensorData* sensor, double valor, char* tipo, char* status, Data
     sensor->M2 += delta * delta2;
 
     sensor->soma += valor;
-
-    // Destrava Mutex
-    pthread_mutex_unlock(&sensor->mutex);
-
+    
     // Soma o status
     if (!strcmp(tipo, "energia")) { data->energiaTotal_local += valor; }
-
+    
     if      (!strcmp(status, "OK"))      { data->okTotais_local++; }
     else if (!strcmp(status, "ALERTA"))  { data->alertasTotais_local++; }
     else if (!strcmp(status, "CRITICO")) { data->criticosTotais_local++; }
     else {
-        printf("ERRO: Status de dado incorreto (%s)\n", status);
+        printf("ERRO: Status de dado incorreto (%s):\n%s\n", status, linha);
         exit(5);
     }
 }
@@ -347,10 +341,7 @@ void* func(void* args) {
     Thread* thread = (Thread*) args;
     
     printf(
-        "Thread %d:\n"
-        "    Iniciada!\n"
-        "    Inicio: %lld\n"
-        "    Fim:    %lld\n\n",
+        "Thread %d: %11lld -> %11lld\n",
         thread->id, thread->inicio, thread-> fim
     );
     
@@ -373,7 +364,9 @@ void* func(void* args) {
     char linha[256];
     while (ftell(file) < thread->fim && fgets(linha, sizeof(linha), file) != NULL) {
         linha[strcspn(linha, "\n")] = '\0'; // Remove o \n do final, e troca por \0
-        // printf("===== Debug 1 (%d) =====\n", thread->id);
+
+        char linha_save[256];
+        strcpy(linha_save, linha);
 
         char* token[TOKENS_QUANT];
         // Formato dos tokens:
@@ -384,11 +377,12 @@ void* func(void* args) {
         // token[1]: AAAA-MM-DD | token[4]: <float> valor | token[6]: status   |
         // token[2]: HH:MM:SS   |                         |                    |
         
-        token[0] = strtok(linha, " ");
+        char* saveptr; // Necessário para strtok_r (thread-safe)
+        token[0] = strtok_r(linha, " ", &saveptr);
         
         // Separando tokens da linha
         for (int i = 1; i < TOKENS_QUANT; i++) {
-            token[i] = strtok(NULL, " ");
+            token[i] = strtok_r(NULL, " ", &saveptr);
         }
 
         if (!token[0] || !token[3] || !token[4] || !token[6]) {
@@ -405,8 +399,9 @@ void* func(void* args) {
         }
         
         // Computando dados. O mutex atua dentro da função
-        add_sensor(&thread->sensores[sensorID], atof(token[4]), token[3], token[6], &data_local);
-        // printf("===== Debug 2 (%d) =====\n", thread->id);
+        pthread_mutex_lock(&thread->sensores[sensorID].mutex);
+        add_sensor(&thread->sensores[sensorID], atof(token[4]), token[3], token[6], &data_local, linha_save);
+        pthread_mutex_unlock(&thread->sensores[sensorID].mutex);
     }
 
     fclose(file);
@@ -420,8 +415,7 @@ void* func(void* args) {
     pthread_mutex_unlock(&thread->data->mutex);
 
     printf(
-        "Thread %d:\n"
-        "    Finalizando!\n\n",
+        "Thread %d: Finalizando!\n",
         thread->id
     );
 
@@ -461,6 +455,7 @@ void sensor_analyzer_par(char* fileName, DataGeral* data, SensorData* sensores, 
     }
 
     for (int i = 0; i < quantThreads; i++) { pthread_join(threads[i].thread, NULL); }
+    putchar('\n');
     for (int i = 0; i < MAX_SENSORES; i++) { pthread_mutex_destroy(&sensores[i].mutex); }
 
     free(threads);
@@ -495,7 +490,7 @@ int main(int argc, char* argv[]) {
     sensor_analyzer_par(fileName, &data, sensores, quantThreads);
     timer_fim(&data);
 
-    print_data(&data, sensores);
+    // print_data(&data, sensores);
     print_final(&data, sensores);
 
     return 0;

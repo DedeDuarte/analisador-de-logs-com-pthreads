@@ -9,15 +9,15 @@ TARGET_SEQ = a_seq.out
 SRC_PAR = sensor_analyzer_par.c
 TARGET_PAR = a_par.out
 
-all:
-	@echo "Compilando versão paralela"
-	@$(CC) $(CFLAGS) -o $(TARGET_PAR) $(SRC_PAR) $(LDFLAGS_PAR)
-
 # all:
-# 	@echo "Opções disponíveis:"
-# 	@echo "    seq   - Compila versão sequencial"
-# 	@echo "    par   - Compila versão paralela"
-# 	@echo "    clean - Limpa arquivos"
+# 	@echo "Compilando versão paralela"
+# 	@$(CC) $(CFLAGS) -o $(TARGET_PAR) $(SRC_PAR) $(LDFLAGS_PAR)
+
+all:
+	@echo "Opções disponíveis:"
+	@echo "    seq   - Compila versão sequencial"
+	@echo "    par   - Compila versão paralela"
+	@echo "    clean - Limpa arquivos"
 
 seq:
 	@echo "Compilando versão sequencial"
@@ -25,6 +25,11 @@ seq:
 
 par:
 	@echo "Compilando versão paralela"
+	@$(CC) $(CFLAGS) -o $(TARGET_PAR) $(SRC_PAR) $(LDFLAGS_PAR)
+
+full:
+	@echo "Compilando versão sequencial e paralela"
+	@$(CC) $(CFLAGS) -o $(TARGET_SEQ) $(SRC_SEQ) $(LDFLAGS_SEQ)
 	@$(CC) $(CFLAGS) -o $(TARGET_PAR) $(SRC_PAR) $(LDFLAGS_PAR)
 
 clean:
