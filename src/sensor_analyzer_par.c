@@ -345,7 +345,7 @@ void print_final(DataGeral* data, SensorData* sensores) {
 void* func(void* args) {
     DataLocal data_local = {0};
     Thread* thread = (Thread*) args;
-
+    
     printf(
         "Thread %d:\n"
         "    Iniciada!\n"
@@ -353,31 +353,29 @@ void* func(void* args) {
         "    Fim:    %lld\n\n",
         thread->id, thread->inicio, thread-> fim
     );
-
+    
     // Abrir arquivo
     FILE* file = fopen(thread->fileName, "r");
     if (file == NULL) {
         perror("fopen");
         exit(2);
     }
-
+    
     fseek(file, thread->inicio, SEEK_SET);
-
+    
     // Se não for a primeira thread, vai pra próxima linha
     if (thread->inicio != 0) {
         int c;
         while ((c = fgetc(file)) != '\n' && c != EOF);
     }
-
+    
     // Lê o arquivo até o fim do bloco dessa thread
     char linha[256];
-    while (fgets(linha, sizeof(linha), file) != NULL) {
-        // Se ultrapassar o bloco esperado da thread, termina
-        if (ftell(file) < thread->fim) break;
-
+    while (ftell(file) < thread->fim && fgets(linha, sizeof(linha), file) != NULL) {
         linha[strcspn(linha, "\n")] = '\0'; // Remove o \n do final, e troca por \0
+        // printf("===== Debug 1 (%d) =====\n", thread->id);
 
-        char* token[TOKENS_QUANT]; 
+        char* token[TOKENS_QUANT];
         // Formato dos tokens:
         //
         //     IDENTIFICAÇÃO    |          MEDIDA         |       STATUS       |
@@ -387,23 +385,28 @@ void* func(void* args) {
         // token[2]: HH:MM:SS   |                         |                    |
         
         token[0] = strtok(linha, " ");
-
+        
         // Separando tokens da linha
         for (int i = 1; i < TOKENS_QUANT; i++) {
             token[i] = strtok(NULL, " ");
         }
 
+        if (!token[0] || !token[3] || !token[4] || !token[6]) {
+            continue; // pula linha inválida
+        }
+        
         int sensorID = atoi(token[0] + 7)-1; // Formato: sensor_XXX -> sensor_ tem sete linhas,
-                                             // então (sensor_ + 7) = Parte numérica.
-                                             // -1 por ser index partindo de 0
-
+        // então (sensor_ + 7) = Parte numérica.
+        // -1 por ser index partindo de 0
+        
         if (sensorID >= MAX_SENSORES) {
             printf("ERRO: Quantidade de sensores maior do que o permitido! (Qauntidade máxima: %d)\n", MAX_SENSORES);
             exit(3);
         }
-
+        
         // Computando dados. O mutex atua dentro da função
         add_sensor(&thread->sensores[sensorID], atof(token[4]), token[3], token[6], &data_local);
+        // printf("===== Debug 2 (%d) =====\n", thread->id);
     }
 
     fclose(file);
@@ -457,10 +460,8 @@ void sensor_analyzer_par(char* fileName, DataGeral* data, SensorData* sensores, 
         pthread_create(&thread->thread, NULL, func, thread);
     }
 
-    for (int i = 0; i < quantThreads; i++) {
-        pthread_join(threads[i].thread, NULL);
-        pthread_mutex_destroy(&sensores->mutex);
-    }
+    for (int i = 0; i < quantThreads; i++) { pthread_join(threads[i].thread, NULL); }
+    for (int i = 0; i < MAX_SENSORES; i++) { pthread_mutex_destroy(&sensores[i].mutex); }
 
     free(threads);
 }
@@ -487,7 +488,7 @@ int main(int argc, char* argv[]) {
     pthread_mutex_init(&data.mutex, NULL);
 
     SensorData sensores[MAX_SENSORES] = {0};
-    for (int i = 0; i < quantThreads; i++) { pthread_mutex_init(&sensores[i].mutex, NULL); }
+    for (int i = 0; i < MAX_SENSORES; i++) { pthread_mutex_init(&sensores[i].mutex, NULL); }
 
     // Processo principal
     timer_inicio(&data);
