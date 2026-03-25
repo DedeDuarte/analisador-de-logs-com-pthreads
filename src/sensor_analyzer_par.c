@@ -5,6 +5,7 @@
 #include <string.h>
 #include <math.h>
 #include <time.h>
+#include <pthread.h>
 
 #define TOKENS_QUANT 7 // Quantidades de tokens do .log
 #define MAX_SENSORES 100 // Quantidade máxima de sensores aceita. Nescessário para alocar memória
@@ -23,6 +24,8 @@
  * @param fim struct de @c timespec . Fim do processo de analize do arquivo
  */
 typedef struct {
+    pthread_mutex_t mutex;
+
     long long sensores;
 
     int okTotais;
@@ -34,9 +37,20 @@ typedef struct {
     struct timespec fim;
 } DataGeral;
 
+typedef struct {
+    long long sensores;
+
+    int okTotais_local;
+    int alertasTotais_local;
+    int criticosTotais_local;
+    long double energiaTotal_local;
+} DataLocal;
+
 /**
- * @brief Estrutura de um único sensor
+ * @brief Estrutura de um único sensor. Nescessária a inicialização do mutex
  * @details @c sensor_... são variavis que indicam de qual tipo é aquele sensor
+ * 
+ * @param mutex Mutex para evitar que múltiplas threads editem um sensor ao mesmo tempo
  * 
  * @param count Quantidade de vezes que aquele sensor foi lido
  * 
@@ -51,6 +65,8 @@ typedef struct {
  * @param sensor_pressao Indica se o sensor é de pressao
  */
 typedef struct {
+    pthread_mutex_t mutex;
+
     int count;
 
     long double soma;
@@ -64,7 +80,34 @@ typedef struct {
     char sensor_pressao;
 } SensorData;
 
-/** NOTE Atualizar esse bloco de comentário
+/**
+ * @brief Estrutura de args e ponteiros para cada thread
+ * 
+ * @param thread Thread_t dela mesma
+ * 
+ * @param id ID da thread (valor do @c i )
+ * 
+ * @param inicio De que linha a thread deve começar
+ * @param fim Linha a qual a thread n deve mais acessar
+ * @param fileName Nome do arquivo a ser lido
+ * 
+ * @param data Data geral do arquivo lido
+ * @param sensores Array de sensores com seus mutex
+ */
+typedef struct {
+    pthread_t thread;
+
+    int id;
+
+    long long inicio;
+    long long fim;
+    char* fileName;
+
+    DataGeral* data;
+    SensorData* sensores;
+} Thread;
+
+/**
  * @brief Adiciona uma nova leitura de temperatura ao sensor e atualiza as estatísticas
  * @details Atualiza o contador, a média e o acumulador M2 utilizando o algoritmo iterativo
  *          para cálculo de desvio padrão (Welford). Também acumula a soma das temperaturas
@@ -72,7 +115,10 @@ typedef struct {
  * @param sensor Ponteiro para a estrutura do sensor a ser atualizada
  * @param valor Valor da temperatura a ser adicionada
  */
-void add_sensor(SensorData* sensor, double valor, char* tipo, char* status, DataGeral* data) {
+void add_sensor(SensorData* sensor, double valor, char* tipo, char* status, DataLocal* data) {
+    // Trava Mutex
+    pthread_mutex_lock(&sensor->mutex);
+
     // Atribui qual o tipo do sensor
     if (sensor->count == 0) {
         data->sensores++;
@@ -98,12 +144,16 @@ void add_sensor(SensorData* sensor, double valor, char* tipo, char* status, Data
     sensor->M2 += delta * delta2;
 
     sensor->soma += valor;
-    if (!strcmp(tipo, "energia")) { data->energiaTotal += valor; }
-    
+
+    // Destrava Mutex
+    pthread_mutex_unlock(&sensor->mutex);
+
     // Soma o status
-    if      (!strcmp(status, "OK"))      data->okTotais++;
-    else if (!strcmp(status, "ALERTA"))  data->alertasTotais++;
-    else if (!strcmp(status, "CRITICO")) data->criticosTotais++;
+    if (!strcmp(tipo, "energia")) { data->energiaTotal_local += valor; }
+
+    if      (!strcmp(status, "OK"))      { data->okTotais_local++; }
+    else if (!strcmp(status, "ALERTA"))  { data->alertasTotais_local++; }
+    else if (!strcmp(status, "CRITICO")) { data->criticosTotais_local++; }
     else {
         printf("ERRO: Status de dado incorreto (%s)\n", status);
         exit(5);
@@ -292,25 +342,39 @@ void print_final(DataGeral* data, SensorData* sensores) {
     );
 }
 
-/**
- * @brief Abrir e analizar arquivo solicitado, preenchendo estsrutauras com seus dados
- * @details Chama a função @c add_sensor()
- * 
- * @param fileName Nome do arquivo desejado
- * @param data Estrutura de dados das informações gerais do arquivo
- * @param sensores Lista de estruturas @c SensorData . Quantidade: @c MAX_SENSORES
- */
-void sensor_analyzer_seq(char* fileName, DataGeral* data, SensorData* sensores) {
+void* func(void* args) {
+    DataLocal data_local = {0};
+    Thread* thread = (Thread*) args;
+
+    printf(
+        "Thread %d:\n"
+        "    Iniciada!\n"
+        "    Inicio: %lld\n"
+        "    Fim:    %lld\n\n",
+        thread->id, thread->inicio, thread-> fim
+    );
+
     // Abrir arquivo
-    FILE* file = fopen(fileName, "r");
+    FILE* file = fopen(thread->fileName, "r");
     if (file == NULL) {
         perror("fopen");
         exit(2);
     }
 
-    // Ler cada linha do arquivo
+    fseek(file, thread->inicio, SEEK_SET);
+
+    // Se não for a primeira thread, vai pra próxima linha
+    if (thread->inicio != 0) {
+        int c;
+        while ((c = fgetc(file)) != '\n' && c != EOF);
+    }
+
+    // Lê o arquivo até o fim do bloco dessa thread
     char linha[256];
     while (fgets(linha, sizeof(linha), file) != NULL) {
+        // Se ultrapassar o bloco esperado da thread, termina
+        if (ftell(file) < thread->fim) break;
+
         linha[strcspn(linha, "\n")] = '\0'; // Remove o \n do final, e troca por \0
 
         char* token[TOKENS_QUANT]; 
@@ -338,46 +402,105 @@ void sensor_analyzer_seq(char* fileName, DataGeral* data, SensorData* sensores) 
             exit(3);
         }
 
-        add_sensor(&sensores[sensorID], atof(token[4]), token[3], token[6], data);
+        // Computando dados. O mutex atua dentro da função
+        add_sensor(&thread->sensores[sensorID], atof(token[4]), token[3], token[6], &data_local);
     }
 
     fclose(file);
+
+    pthread_mutex_lock(&thread->data->mutex);
+    thread->data->sensores       += data_local.sensores;
+    thread->data->okTotais       += data_local.okTotais_local;
+    thread->data->alertasTotais  += data_local.alertasTotais_local;
+    thread->data->criticosTotais += data_local.criticosTotais_local;
+    thread->data->energiaTotal   += data_local.energiaTotal_local;
+    pthread_mutex_unlock(&thread->data->mutex);
+
+    printf(
+        "Thread %d:\n"
+        "    Finalizando!\n\n",
+        thread->id
+    );
+
+    return NULL;
 }
 
-/**
- * @brief Função principal
- * @details Chama as funções @c sensor_analyzer_seq() e @c time_...()
- * 
- * @param argc Quantidade de argumentos passados na execução
- * @param argv Lista de strings dos argumentos passados
- */
-int main(int argc, char* argv[]) {
-    // Variaveis gerais
-    DataGeral data = {0};
-    SensorData sensores[MAX_SENSORES] = {0};
+void sensor_analyzer_par(char* fileName, DataGeral* data, SensorData* sensores, const int quantThreads) {
+    // Descobrindo tamanho do arquivo
+    FILE* file = fopen(fileName, "r");
+    if (file == NULL) {
+        perror("fopen");
+        exit(2);
+    }
+    
+    fseek(file, 0, SEEK_END);
+    long long tamanhoBytes = ftell(file); // Tamanho do arquivo em bytes
+    rewind(file);
 
+    fclose(file);
+
+    // Inicializando threads
+    Thread* threads = malloc(quantThreads * sizeof(Thread));
+
+    long long chunk = tamanhoBytes / quantThreads;
+
+    for (int i = 0; i < quantThreads; i++) {
+        Thread* thread = &threads[i];
+
+        thread->id = i;
+        thread->inicio = i * chunk;
+        thread->fim = (i == quantThreads-1) ? tamanhoBytes : (i+1) * chunk;
+        thread->fileName = fileName;
+        thread->data = data;
+        thread->sensores = sensores;
+
+        pthread_create(&thread->thread, NULL, func, thread);
+    }
+
+    for (int i = 0; i < quantThreads; i++) {
+        pthread_join(threads[i].thread, NULL);
+        pthread_mutex_destroy(&sensores->mutex);
+    }
+
+    free(threads);
+}
+
+int main(int argc, char* argv[]) {
     // Buscar nome do arquivo de logs
     char fileName[128];
-    if (argc > 2) {
+    if (argc < 2 || argc > 3) {
         printf(
             "Usos:\n"
-            "Nome de arquivo padrão:        %s\n"
-            "Nome de arquivo personalizado: %s <.log>\n",
+            "Nome de arquivo padrão:        %s <num threads>\n"
+            "Nome de arquivo personalizado: %s <num threads> <.log>\n",
             argv[0], argv[0]
         );
-
+        
         exit(1);
     }
-    else if (argc == 2) strcpy(fileName, argv[1]);
+    int quantThreads = atoi(argv[1]);
+    if (argc == 3) strcpy(fileName, argv[2]);
     else strcpy(fileName, "sensores.log");
+    
+    // Variaveis gerais
+    DataGeral data = {0};
+    pthread_mutex_init(&data.mutex, NULL);
+
+    SensorData sensores[MAX_SENSORES] = {0};
+    for (int i = 0; i < quantThreads; i++) { pthread_mutex_init(&sensores[i].mutex, NULL); }
 
     // Processo principal
     timer_inicio(&data);
-    sensor_analyzer_seq(fileName, &data, sensores);
+    sensor_analyzer_par(fileName, &data, sensores, quantThreads);
     timer_fim(&data);
 
-    // print_data(&data, sensores);
+    print_data(&data, sensores);
     print_final(&data, sensores);
 
     return 0;
 }
+
+// CONTINUE
+// Descobrir por que n está somando os valores na DataGeral.
+// Até onde eu sei era para estar funcionando, mas claramente não está :)
+// Boa noite, são 1h da manhã, e eu tenho aula amanhã <3
