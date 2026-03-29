@@ -262,19 +262,6 @@ double timer_resultado(DataGeral* data) {
  * @param sensores Lista de estruturas @c SensorData . Quantidade: @c MAX_SENSORES
  */
 void print_final(DataGeral* data, SensorData* sensores) {
-    printf(
-        "Ps.:\n"
-        "    Estou printando duas medias:\n"
-        "    - A media de todos os sensores\n"
-        "    - A media apenas dos sensores de temperatura\n"
-        "    Nao entendi qual dos dois que era para ser printado.\n"
-        "    Printando os 2 nao tem erro hahaha\n\n"
-    );
-    printf("Media dos 10 primeiros sensores:\n");
-    for (int i = 0; i < 10 && i < data->sensores; i++) {
-        printf("    Media sensor %2d: %6.2Lf\n", i+1, sensores[i].media);
-    }
-
     char temp_printados = 0;
     printf("\nMedia dos 10 primeiros sensores de temperatura:\n");
     for (int i = 0; i < data->sensores; i++) {
